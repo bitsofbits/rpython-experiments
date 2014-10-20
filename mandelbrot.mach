@@ -1,0 +1,85 @@
+# Initialize variables
+set x_center -0.5
+set y_center 0.0
+set width 4.0
+set i_max 1600
+set j_max 1200
+# set i_max 400
+# set j_max 300
+set n 100
+set r_max 2.0
+set color_max 255
+exec temp float color_max
+exec scale div temp n
+exec pixel_size div width i_max
+# x_offset = x_center - (0.5 * pixel_size * (i_max + 1))
+exec temp add i_max 1
+exec temp mul temp pixel_size
+exec temp mul temp 0.5
+exec x_offset sub x_center temp
+# y_offset = x_center - (0.5 * pixel_size * (j_max + 1))
+exec temp add j_max 1
+exec temp mul temp pixel_size
+exec temp mul temp 0.5
+exec y_offset sub y_center temp
+
+# Output preamble
+display "P2"
+display i_max
+display j_max
+display color_max
+
+set j 0
+label j_loop
+exec im0 mul pixel_size j
+exec im0 add im0 y_offset
+set i 0
+label i_loop
+exec re0 mul pixel_size i
+exec re0 add re0 x_offset
+
+jump iterate_z
+label return_from_iterate
+exec  grey_value mul scale k
+exec  grey_value int grey_value
+display grey_value
+
+exec   i add i 1
+exec      flag lt i i_max
+branchif  flag i_loop
+
+exec   j add j 1
+exec      flag lt j j_max
+branchif  flag j_loop
+
+end
+
+
+label iterate_z
+#     for k in range(n):
+set k 0
+set re 0.0
+set im 0.0
+label k_loop
+#         temp = re*re - im*im + re0
+exec temp mul re re
+exec temp1 mul im im
+exec temp  sub temp temp1
+exec temp  add temp re0
+#         im = 2*re*im + im0
+exec   im   mul 2.0 im
+exec   im   mul im re
+exec   im   add im im0
+#         re = temp
+set re  temp
+#         if hypot(re, im) > r_max:
+exec  mag  hypot re im
+exec      flag gt   mag  r_max
+branchif  flag  return_from_iterate
+# end of loop
+exec   k add k 1
+exec      flag   lt k n
+branchif  flag    k_loop
+#             return n
+set k n
+jump return_from_iterate
