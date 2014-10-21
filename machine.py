@@ -1,19 +1,55 @@
 from __future__ import print_function
-import os, sys, math
-sys.path.append("/Users/timothyhochberg/Code/PyPy/pypy-2.3.1-src")
-from rpython.rlib.jit import JitDriver, purefunction, hint
+"""machine.py – a bytecode interpreter to experiment with RPython
 
-#http://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html
-#
-#https://bitly.com/bundles/cfbolz/1
-#http://rpython.readthedocs.org/en/improve-docs/rpython.html
+This code was part of an attempt to wrap my head around the RPython tool chain. This
+code takes as input something resembling assembly language (see mandelbrot.mach as
+an example), compiles it to byte code and then executes it. If run on the standard
+CPython interpreter, it is quite slow. Performance with PyPy is much better. If this
+program is translated with RPython --jit, performance is much, much better. 
+
+This has only really been tested by running mandelbrot.mach, so it probably has a bunch of
+buggy edge cases that haven't been exercised. To run mandelbrot.mach using python, for
+example, use:
+    $ python machine.py mandelbrot.mach
+However, be prepared to wait a long time in this case. The commands used to translate the
+code using RPython are given below.
+
+The code below would make more sense broken into several files, but I've kept it as one
+for ease of download, etc. The sections are:
+    * Syntax Tree 
+    * Parser and Compiler
+    * Operators
+    * Main Loop
+    * Launching Code / RPython Stuff
+
+ The second section is not very relevant to the RPython aspect of the code, but the first
+ section will tell you something about how I had to set up the data structures to make this
+ work with RPython. The critical restriction is that a variable may only hold a single 
+ type at a given location in the code. This leads to variable in the code getting boxed,
+ so that objects, which can hold more than one type as values internally get passed around
+ instead of the raw values.
+
+Some useful links for writing an interpreter in PyPy. 
+Start Here: http://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html
+More Info on RPython: http://rpython.readthedocs.org/en/improve-docs/rpython.html
+Helpful hints on optimization and such: https://bitly.com/bundles/cfbolz/
+
+These are the commands that I used to translate this. You would likely need to adjust 
+the paths. The jit option can be skipped; translation is faster, but performance suffers.
+export PYPY_LOCALBASE=~/Code/PyPy/pypy-2.3.1-src
+pypy-2.3.1-osx64/bin/pypy pypy-2.3.1-src/rpython/bin/rpython --opt=jit machine.py 
+
+"""
+import os
+import sys
+import math
+sys.path.append("~/Code/PyPy/pypy-2.3.1-src")
+from rpython.rlib.jit import JitDriver, purefunction, hint
 
 stdin_fd = sys.stdin.fileno()
 stdout_fd = sys.stdout.fileno()
 stderr_fd =  sys.stderr.fileno()
 
-# export PYPY_LOCALBASE=/Users/timothyhochberg/Code/PyPy/pypy-2.3.1-src
-# pypy-2.3.1-osx64/bin/pypy pypy-2.3.1-src/rpython/bin/rpython --opt=jit machine_rpy.py 
 
 #-------- Syntax Tree --------
 
@@ -238,6 +274,21 @@ def compile(program):
 def both_ints(a, b):
     return isinstance(a, MInt) and isinstance(b, MInt)
 
+def int_value(x):
+    if isinstance(x, MInt):
+        return x.value
+    if isinstance(x, MFloat):
+        return int(x.value)
+    raise RuntimeError("illegal value to int_value")
+   
+def float_value(x):
+    if isinstance(x, MInt):
+        return float(x.value)
+    if isinstance(x, MFloat):
+        return x.value
+    raise RuntimeError("illegal value to int_value")
+    
+
 def o_lt(a, b):
     return MInt(int_value(a) < int_value(b)) if both_ints(a,b) else MInt(float_value(a) < float_value(b))
 
@@ -269,7 +320,8 @@ def o_int(a):
     return MInt(int_value(a))
     
 
-_monops = [('float', o_float), ('int', o_int)]
+_monops = [('float', o_float), 
+           ('int', o_int)]
 
 monop_map = dict((x[0], i) for (i, x) in enumerate(_monops))
 for k, v in monop_map.items():
@@ -287,22 +339,10 @@ _binops = [('lt', o_lt),
 binop_map = dict((x[0], i) for (i, x) in enumerate(_binops))
 for k, v in binop_map.items():
     globals()["O_" + k.upper()] = v
+ 
                       
-    
-def int_value(x):
-    if isinstance(x, MInt):
-        return x.value
-    if isinstance(x, MFloat):
-        return int(x.value)
-    raise RuntimeError("illegal value to int_value")
-   
-def float_value(x):
-    if isinstance(x, MInt):
-        return float(x.value)
-    if isinstance(x, MFloat):
-        return x.value
-    raise RuntimeError("illegal value to int_value")
-    
+# -------- Main Loop --------
+
 @purefunction
 def opcode(code, pc):
     return code[pc]
@@ -378,11 +418,14 @@ def execute(program):
         return 1
             
 
+#-------- Launching Code / RPython Stuff
 
+# For RPython, we use the default policy.
 def jitpolicy(driver):
     from rpython.jit.codewriter.policy import JitPolicy
     return JitPolicy()
     
+# This is for logging, which can be helpful for optimizing.
 def get_location(pc, code, program):
     if pc < 0:
         return "<illegal PC>"
@@ -391,12 +434,13 @@ def get_location(pc, code, program):
         
     return "PC: %s" % pc
 
+# This tells RPython what stays constant in the main loop (pc, code, program) and what is 
+# expected to change (mem). These are mapped to the actual variables inside the main loop
+# with the jit_merge_point function.
 jitdriver = JitDriver(greens=['pc', 'code', 'program'],
                       reds=['mem'],
                       get_printable_location=get_location)
 
-
-    
 def main(argv):
     if len(argv) != 2:
         os.write(stderr_fd, 'Usage %s FILENAME\n' % argv[0])
@@ -413,6 +457,7 @@ def main(argv):
         return_code = execute(program)
         return return_code
         
+# This tells RPython what to use and entry point for compiling.
 def target(*args):
     return main, None
         

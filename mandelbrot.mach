@@ -1,3 +1,5 @@
+# This is a transliteration of mandelbrot.py into code that runs on machine.py.
+
 # Initialize variables
 set x_center -0.5
 set y_center 0.0
